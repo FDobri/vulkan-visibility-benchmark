@@ -1,0 +1,25 @@
+#version 450
+layout(local_size_x = 128) in;
+layout(set=0, binding=0, std430) readonly buffer Objects { vec4 objects[]; };
+layout(set=0, binding=1, std430) writeonly buffer Visible { uint ids[]; };
+layout(set=0, binding=2, std430) buffer Command {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+} command;
+layout(set=0, binding=3, std140) uniform Camera {
+    mat4 vp;
+    vec4 planes[6];
+    vec4 right;
+    vec4 up;
+    uint count;
+} camera;
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= camera.count) return;
+    vec4 object = objects[id];
+    for (int i = 0; i < 6; ++i)
+        if (dot(camera.planes[i], vec4(object.xyz, 1)) < -object.w) return;
+    ids[atomicAdd(command.instanceCount, 1)] = id;
+}
