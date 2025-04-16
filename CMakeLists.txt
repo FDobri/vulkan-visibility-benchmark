@@ -16,3 +16,15 @@ FetchContent_Declare(vma URL https://codeload.github.com/GPUOpen-LibrariesAndSDK
 FetchContent_Declare(imgui URL https://codeload.github.com/ocornut/imgui/tar.gz/refs/tags/v1.91.9b)
 FetchContent_MakeAvailable(vulkan_headers volk glfw glm vma imgui)
 target_link_libraries(volk PUBLIC Vulkan::Headers)
+
+find_program(GLSLANG NAMES glslang glslangValidator HINTS "$ENV{VULKAN_SDK}/Bin" REQUIRED)
+set(shader_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+foreach(shader cull.comp scene.vert scene.frag)
+    add_custom_command(OUTPUT "${shader_dir}/${shader}.spv"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${shader_dir}"
+        COMMAND "${GLSLANG}" -V --target-env vulkan1.2
+            -o "${shader_dir}/${shader}.spv" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader}"
+        DEPENDS "shaders/${shader}" VERBATIM)
+    list(APPEND outputs "${shader_dir}/${shader}.spv")
+endforeach()
+add_custom_target(spirv DEPENDS ${outputs})
