@@ -40,3 +40,50 @@ bool visible(const Camera& camera, glm::vec4 sphere) {
     });
 }
 }
+
+Renderer::~Renderer() {
+    if (!device_) return;
+    if (queries_) vkDestroyQueryPool(device_, queries_, nullptr);
+    if (graphics_) vkDestroyPipeline(device_, graphics_, nullptr);
+    if (compute_) vkDestroyPipeline(device_, compute_, nullptr);
+    if (layout_) vkDestroyPipelineLayout(device_, layout_, nullptr);
+    if (pool_) vkDestroyDescriptorPool(device_, pool_, nullptr);
+    if (set_layout_) vkDestroyDescriptorSetLayout(device_, set_layout_, nullptr);
+    if (allocator_) {
+        for (auto b : {objects_, indices_, command_, camera_})
+            if (b.handle) vmaDestroyBuffer(allocator_, b.handle, b.allocation);
+        vmaDestroyAllocator(allocator_);
+    }
+}
+Renderer::Buffer Renderer::allocate(VkDeviceSize bytes, VkBufferUsageFlags usage, bool readback) {
+    VkBufferCreateInfo buffer{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    buffer.size = bytes;
+    buffer.usage = usage;
+    VmaAllocationCreateInfo memory{};
+    memory.usage = VMA_MEMORY_USAGE_AUTO;
+    memory.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
+        (readback ? VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT :
+                    VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    VmaAllocationInfo info{};
+    Buffer result{};
+    check(vmaCreateBuffer(allocator_, &buffer, &memory, &result.handle, &result.allocation, &info));
+    result.mapped = info.pMappedData;
+    return result;
+}
+VkShaderModule Renderer::shader(const char* file) {
+    const auto path = std::filesystem::path(VIS_SHADER_DIR) / file;
+    std::ifstream stream(path, std::ios::binary | std::ios::ate);
+    const auto end = stream.tellg();
+    if (end <= 0 || end % 4 != 0) throw std::runtime_error("invalid SPIR-V: " + path.string());
+    std::vector<std::uint32_t> words(static_cast<std::size_t>(end) / 4);
+    stream.seekg(0);
+    if (!stream.read(reinterpret_cast<char*>(words.data()), end))
+        throw std::runtime_error("could not read SPIR-V");
+    VkShaderModuleCreateInfo info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    info.codeSize = words.size() * sizeof(words[0]);
+    info.pCode = words.data();
+    VkShaderModule module{};
+    check(vkCreateShaderModule(device_, &info, nullptr, &module));
+    return module;
+}
+void Renderer::init(VkInstance instance, VkPhysicalDevice physical, VkDevice device,
