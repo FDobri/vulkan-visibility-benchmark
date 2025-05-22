@@ -87,3 +87,81 @@ VkShaderModule Renderer::shader(const char* file) {
     return module;
 }
 void Renderer::init(VkInstance instance, VkPhysicalDevice physical, VkDevice device,
+                    VkRenderPass pass, std::uint32_t timestamp_bits) {
+    device_ = device;
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(physical, &properties);
+    timestamp_period_ = properties.limits.timestampPeriod;
+    timestamp_mask_ = timestamp_bits == 64 ? ~std::uint64_t{0} : (std::uint64_t{1} << timestamp_bits) - 1;
+    VmaVulkanFunctions funcs{};
+    funcs.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+    funcs.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
+    VmaAllocatorCreateInfo create{};
+    create.physicalDevice = physical;
+    create.device = device;
+    create.instance = instance;
+    create.vulkanApiVersion = VK_API_VERSION_1_2;
+    create.pVulkanFunctions = &funcs;
+    check(vmaCreateAllocator(&create, &allocator_));
+
+    objects_ = allocate(max_objects * sizeof(glm::vec4), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    indices_ = allocate(max_objects * sizeof(std::uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    command_ = allocate(sizeof(VkDrawIndirectCommand),
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
+    camera_ = allocate(sizeof(Camera), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    scene_.reserve(max_objects);
+    std::uint32_t random = 0xf254ca17;
+    auto next = [&] {
+        random ^= random << 13; random ^= random >> 17; random ^= random << 5;
+        return static_cast<float>(random & 65535) / 65535.0f - 0.5f;
+    };
+    for (std::uint32_t i = 0; i < max_objects; ++i) {
+        const auto x = next(), y = next(), z = next(), r = next();
+        scene_.emplace_back(x * 128, y * 48, z * 128, .095f + (r + .5f) * .085f);
+    }
+    std::memcpy(objects_.mapped, scene_.data(), max_objects * sizeof(glm::vec4));
+    check(vmaFlushAllocation(allocator_, objects_.allocation, 0, VK_WHOLE_SIZE));
+
+    const std::array<VkDescriptorSetLayoutBinding, 4> bindings{{
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, nullptr},
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, nullptr},
+        {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+        {3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT, nullptr}
+    }};
+    VkDescriptorSetLayoutCreateInfo set_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, nullptr,
+                                             0, static_cast<std::uint32_t>(bindings.size()), bindings.data()};
+    check(vkCreateDescriptorSetLayout(device_, &set_info, nullptr, &set_layout_));
+    const VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3},
+                                           {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
+    VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, nullptr, 0, 1, 2, sizes};
+    check(vkCreateDescriptorPool(device_, &pool, nullptr, &pool_));
+    VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                                            nullptr, pool_, 1, &set_layout_};
+    check(vkAllocateDescriptorSets(device_, &allocation, &set_));
+    const VkBuffer buffers[] = {objects_.handle, indices_.handle, command_.handle, camera_.handle};
+    VkDescriptorBufferInfo infos[4]{};
+    VkWriteDescriptorSet writes[4]{};
+    for (std::uint32_t i = 0; i < 4; ++i) {
+        infos[i] = {buffers[i], 0, VK_WHOLE_SIZE};
+        writes[i] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set_, i, 0, 1,
+                     bindings[i].descriptorType, nullptr, &infos[i], nullptr};
+    }
+    vkUpdateDescriptorSets(device_, 4, writes, 0, nullptr);
+    VkPipelineLayoutCreateInfo layout{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    layout.setLayoutCount = 1;
+    layout.pSetLayouts = &set_layout_;
+    check(vkCreatePipelineLayout(device_, &layout, nullptr, &layout_));
+    const auto module = shader("cull.comp.spv");
+    VkComputePipelineCreateInfo compute{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    compute.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
+                     VK_SHADER_STAGE_COMPUTE_BIT, module, "main", nullptr};
+    compute.layout = layout_;
+    const auto status = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &compute, nullptr, &compute_);
+    vkDestroyShaderModule(device_, module, nullptr);
+    check(status);
+    VkQueryPoolCreateInfo query{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, nullptr, 0,
+                                 VK_QUERY_TYPE_TIMESTAMP, 3, 0};
+    check(vkCreateQueryPool(device_, &query, nullptr, &queries_));
+    make_graphics(pass);
+}
