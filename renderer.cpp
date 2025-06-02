@@ -206,3 +206,51 @@ void Renderer::make_graphics(VkRenderPass pass) {
     vkDestroyShaderModule(device_, vertex, nullptr);
     check(status);
 }
+std::uint32_t Renderer::reference_count(const Camera& camera) const {
+    return static_cast<std::uint32_t>(std::count_if(scene_.begin(), scene_.begin() + camera.count,
+                                                  [&](auto sphere) { return visible(camera, sphere); }));
+}
+void Renderer::record(VkCommandBuffer cmd, VkRenderPassBeginInfo pass, const Camera& camera, bool gpu) {
+    using Clock = std::chrono::steady_clock;
+    std::memcpy(camera_.mapped, &camera, sizeof(camera));
+    check(vmaFlushAllocation(allocator_, camera_.allocation, 0, VK_WHOLE_SIZE));
+    const auto start = Clock::now();
+    VkDrawIndirectCommand draw{6, 0, 0, 0};
+    if (!gpu) {
+        auto* ids = static_cast<std::uint32_t*>(indices_.mapped);
+        for (std::uint32_t i = 0; i < camera.count; ++i)
+            if (visible(camera, scene_[i])) ids[draw.instanceCount++] = i;
+        check(vmaFlushAllocation(allocator_, indices_.allocation, 0, VK_WHOLE_SIZE));
+    }
+    vkCmdResetQueryPool(cmd, queries_, 0, 3);
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queries_, 0);
+    vkCmdUpdateBuffer(cmd, command_.handle, 0, sizeof(draw), &draw);
+    const VkAccessFlags transfer_access = gpu
+        ? VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT
+        : VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_HOST_READ_BIT;
+    VkMemoryBarrier transfer{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_TRANSFER_WRITE_BIT, transfer_access};
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        gpu ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_HOST_BIT,
+        0, 1, &transfer, 0, nullptr, 0, nullptr);
+    if (gpu) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, compute_);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0, 1, &set_, 0, nullptr);
+        vkCmdDispatch(cmd, (camera.count + 127) / 128, 1, 1);
+        VkMemoryBarrier ready{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_SHADER_WRITE_BIT,
+                              VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_HOST_READ_BIT};
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_HOST_BIT,
+            0, 1, &ready, 0, nullptr, 0, nullptr);
+    }
+    cpu_us_ = std::chrono::duration<double, std::micro>(Clock::now() - start).count();
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries_, 1);
+    vkCmdBeginRenderPass(cmd, &pass, VK_SUBPASS_CONTENTS_INLINE);
+    VkViewport viewport{0, 0, static_cast<float>(pass.renderArea.extent.width),
+                        static_cast<float>(pass.renderArea.extent.height), 0, 1};
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &pass.renderArea);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 1, &set_, 0, nullptr);
+    vkCmdDrawIndirect(cmd, command_.handle, 0, 1, sizeof(draw));
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries_, 2);
+}
