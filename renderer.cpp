@@ -254,3 +254,15 @@ void Renderer::record(VkCommandBuffer cmd, VkRenderPassBeginInfo pass, const Cam
     vkCmdDrawIndirect(cmd, command_.handle, 0, 1, sizeof(draw));
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries_, 2);
 }
+Timing Renderer::read() {
+    std::uint64_t times[3]{};
+    check(vkGetQueryPoolResults(device_, queries_, 0, 3, sizeof(times), times, sizeof(times[0]),
+                                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
+    check(vmaInvalidateAllocation(allocator_, command_.allocation, 0, VK_WHOLE_SIZE));
+    VkDrawIndirectCommand command{};
+    std::memcpy(&command, command_.mapped, sizeof(command));
+    auto duration = [&](int end) {
+        return double((times[end] - times[0]) & timestamp_mask_) * timestamp_period_ / 1000.0;
+    };
+    return {command.instanceCount, cpu_us_, duration(1), duration(2)};
+}
