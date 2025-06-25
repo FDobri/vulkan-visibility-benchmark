@@ -88,5 +88,39 @@ private:
     std::unique_ptr<Renderer> renderer;
     bool surface_ready{}, ui_glfw{}, ui_vulkan{}, rebuild{};
 
+    void select_device() {
+        std::uint32_t count{};
+        check(vkEnumeratePhysicalDevices(instance, &count, nullptr));
+        std::vector<VkPhysicalDevice> gpus(count);
+        check(vkEnumeratePhysicalDevices(instance, &count, gpus.data()));
+        int best = 0;
+        for (auto gpu : gpus) {
+            VkPhysicalDeviceProperties p{};
+            vkGetPhysicalDeviceProperties(gpu, &p);
+            if (p.apiVersion < VK_API_VERSION_1_2 || !p.limits.timestampComputeAndGraphics) continue;
+            VkFormatProperties format{};
+            vkGetPhysicalDeviceFormatProperties(gpu, VK_FORMAT_B8G8R8A8_UNORM, &format);
+            if (!(format.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT)) continue;
+            std::uint32_t queue_count{};
+            vkGetPhysicalDeviceQueueFamilyProperties(gpu, &queue_count, nullptr);
+            std::vector<VkQueueFamilyProperties> queues(queue_count);
+            vkGetPhysicalDeviceQueueFamilyProperties(gpu, &queue_count, queues.data());
+            for (std::uint32_t i = 0; i < queue_count; ++i) {
+                VkBool32 present{};
+                check(vkGetPhysicalDeviceSurfaceSupportKHR(gpu, i, swap.Surface, &present));
+                constexpr auto flags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+                if (!present || !queues[i].timestampValidBits || (queues[i].queueFlags & flags) != flags) continue;
+                const auto score = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 2 : 1;
+                if (score > best) {
+                    best = score;
+                    physical = gpu;
+                    family = i;
+                    timestamp_bits = queues[i].timestampValidBits;
+                }
+                break;
+            }
+        }
+        if (!physical) throw std::runtime_error("Vulkan 1.2 with graphics, compute, presentation and timestamps is required");
+    }
 };
 }
