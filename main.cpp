@@ -122,5 +122,35 @@ private:
         }
         if (!physical) throw std::runtime_error("Vulkan 1.2 with graphics, compute, presentation and timestamps is required");
     }
+    void stop_ui() noexcept {
+        if (ui_vulkan) { ImGui_ImplVulkan_Shutdown(); ui_vulkan = false; }
+        if (ui_glfw) { ImGui_ImplGlfw_Shutdown(); ui_glfw = false; }
+        if (ImGui::GetCurrentContext()) ImGui::DestroyContext();
+    }
+    void resize(int width, int height) {
+        check(vkDeviceWaitIdle(device));
+        stop_ui();
+        ImGui_ImplVulkanH_CreateOrResizeWindow(instance, physical, device, &swap, family,
+                                               nullptr, width, height, 2);
+        surface_ready = true;
+        rebuild = false;
+        if (renderer) renderer->make_graphics(swap.RenderPass);
+        ImGui::CreateContext();
+        ImGui::GetIO().IniFilename = nullptr;
+        ui_glfw = ImGui_ImplGlfw_InitForVulkan(window, true);
+        ImGui_ImplVulkan_InitInfo init{};
+        init.ApiVersion = VK_API_VERSION_1_2;
+        init.Instance = instance; init.PhysicalDevice = physical; init.Device = device;
+        init.QueueFamily = family; init.Queue = queue;
+        init.RenderPass = swap.RenderPass;
+        init.MinImageCount = 2; init.ImageCount = swap.ImageCount;
+        init.DescriptorPoolSize = 16;
+        init.CheckVkResultFn = check;
+        ui_vulkan = ImGui_ImplVulkan_Init(&init);
+        if (!ui_glfw || !ui_vulkan) throw std::runtime_error("could not initialize ImGui");
+    }
+    Camera camera(float angle, std::uint32_t count) const {
+        return make_camera(angle, static_cast<float>(swap.Width) / swap.Height, count);
+    }
 };
 }
