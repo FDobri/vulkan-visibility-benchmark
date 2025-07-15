@@ -152,5 +152,39 @@ private:
     Camera camera(float angle, std::uint32_t count) const {
         return make_camera(angle, static_cast<float>(swap.Width) / swap.Height, count);
     }
+    std::optional<Timing> frame(const Camera& view, bool gpu, ImDrawData* overlay) {
+        const auto available = swap.FrameSemaphores[swap.SemaphoreIndex].ImageAcquiredSemaphore;
+        std::uint32_t index{};
+        auto result = vkAcquireNextImageKHR(device, swap.Swapchain, UINT64_MAX, available, nullptr, &index);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) { rebuild = true; return std::nullopt; }
+        if (result == VK_SUBOPTIMAL_KHR) rebuild = true; else check(result);
+        auto& slot = swap.Frames[index];
+        const auto complete = swap.FrameSemaphores[index].RenderCompleteSemaphore;
+        check(vkWaitForFences(device, 1, &slot.Fence, VK_TRUE, UINT64_MAX));
+        check(vkResetFences(device, 1, &slot.Fence));
+        check(vkResetCommandPool(device, slot.CommandPool, 0));
+        VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                                        nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+        check(vkBeginCommandBuffer(slot.CommandBuffer, &begin));
+        VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, nullptr, swap.RenderPass,
+                                   slot.Framebuffer, {{0, 0}, {std::uint32_t(swap.Width), std::uint32_t(swap.Height)}},
+                                   1, &swap.ClearValue};
+        renderer->record(slot.CommandBuffer, pass, view, gpu);
+        if (overlay) ImGui_ImplVulkan_RenderDrawData(overlay, slot.CommandBuffer);
+        vkCmdEndRenderPass(slot.CommandBuffer);
+        check(vkEndCommandBuffer(slot.CommandBuffer));
+        VkPipelineStageFlags wait = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO, nullptr, 1, &available, &wait,
+                            1, &slot.CommandBuffer, 1, &complete};
+        check(vkQueueSubmit(queue, 1, &submit, slot.Fence));
+        VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, nullptr, 1, &complete, 1,
+                                 &swap.Swapchain, &index, nullptr};
+        result = vkQueuePresentKHR(queue, &present);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) rebuild = true;
+        else check(result);
+        swap.SemaphoreIndex = (swap.SemaphoreIndex + 1) % swap.SemaphoreCount;
+        check(vkWaitForFences(device, 1, &slot.Fence, VK_TRUE, UINT64_MAX));
+        return renderer->read();
+    }
 };
 }
