@@ -73,6 +73,37 @@ public:
         vkGetPhysicalDeviceProperties(physical, &properties);
         std::cerr << properties.deviceName << " | " << swap.Width << 'x' << swap.Height << '\n';
     }
+    void interactive() {
+        bool gpu = true, orbit = true;
+        float angle = .43f;
+        int count = 65536;
+        Timing timing{};
+        const auto start = Clock::now();
+        while (!glfwWindowShouldClose(window)) {
+            glfwPollEvents();
+            int width, height;
+            glfwGetFramebufferSize(window, &width, &height);
+            if (!width || !height) { glfwWaitEvents(); continue; }
+            if (rebuild || width != swap.Width || height != swap.Height) resize(width, height);
+            ImGui_ImplVulkan_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos({16, 16}, ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize({345, 178}, ImGuiCond_FirstUseEver);
+            ImGui::Begin("Visibility benchmark");
+            ImGui::Checkbox("Compute culling", &gpu);
+            ImGui::Checkbox("Orbit camera", &orbit);
+            ImGui::SliderInt("Scene objects", &count, 1024, max_objects, "%d", ImGuiSliderFlags_Logarithmic);
+            if (orbit) angle = std::chrono::duration<float>(Clock::now() - start).count() * .22f + .43f;
+            ImGui::Text("Visible: %u", timing.visible);
+            ImGui::Text("CPU work: %.1f us", timing.cpu_us);
+            ImGui::Text("GPU cull phase: %.1f us", timing.gpu_cull_us);
+            ImGui::Text("GPU through scene draw: %.1f us", timing.gpu_total_us);
+            ImGui::End();
+            ImGui::Render();
+            if (auto current = frame(camera(angle, count), gpu, ImGui::GetDrawData())) timing = *current;
+        }
+    }
                           << median(cull) << ',' << median(total) << '\n';
             }
         }
