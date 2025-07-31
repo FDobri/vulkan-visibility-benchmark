@@ -104,6 +104,39 @@ public:
             if (auto current = frame(camera(angle, count), gpu, ImGui::GetDrawData())) timing = *current;
         }
     }
+    void benchmark(bool smoke) {
+        std::cout << "objects,path,visible,cpu_us,gpu_cull_us,gpu_total_us\n";
+        for (std::uint32_t count : {4096u, 65536u, max_objects}) {
+            const auto view = camera(.43f, count);
+            const auto expected = renderer->reference_count(view);
+            const int samples = smoke ? 2 : 120;
+            const int warmup = smoke ? 0 : 12;
+            for (bool gpu : {false, true}) {
+                std::vector<double> cpu, cull, total;
+                for (int i = 0; i < samples + warmup; ++i) {
+                    glfwPollEvents();
+                    if (rebuild) {
+                        int width, height;
+                        glfwGetFramebufferSize(window, &width, &height);
+                        if (!width || !height) throw std::runtime_error("framebuffer unavailable");
+                        resize(width, height);
+                    }
+                    auto result = frame(view, gpu, nullptr);
+                    if (!result) { --i; continue; }
+                    if (result->visible != expected)
+                        throw std::runtime_error("CPU/GPU visible count disagreed");
+                    if (i >= warmup) {
+                        cpu.push_back(result->cpu_us);
+                        cull.push_back(result->gpu_cull_us);
+                        total.push_back(result->gpu_total_us);
+                    }
+                }
+                auto median = [](std::vector<double>& values) {
+                    std::sort(values.begin(), values.end());
+                    return (values[values.size() / 2] + values[(values.size() - 1) / 2]) / 2;
+                };
+                std::cout << count << ',' << (gpu ? "gpu" : "cpu") << ',' << expected << ','
+                          << std::fixed << std::setprecision(2) << median(cpu) << ','
                           << median(cull) << ',' << median(total) << '\n';
             }
         }
