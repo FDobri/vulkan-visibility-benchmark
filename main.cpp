@@ -252,3 +252,16 @@ private:
     }
 };
 }
+
+int main(int argc, char** argv) try {
+    const std::string_view mode = argc > 1 ? argv[1] : "";
+    if (!mode.empty() && mode != "--smoke" && mode != "--benchmark")
+        throw std::runtime_error("usage: visibility [--smoke | --benchmark]");
+    App app;
+    app.start(mode.empty());
+    if (mode.empty()) app.interactive(); else app.benchmark(mode == "--smoke");
+    return 0;
+} catch (const std::exception& e) {
+    std::cerr << e.what() << '\n';
+    return 1;
+}

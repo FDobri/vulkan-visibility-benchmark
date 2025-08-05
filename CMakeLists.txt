@@ -28,3 +28,13 @@ foreach(shader cull.comp scene.vert scene.frag)
     list(APPEND outputs "${shader_dir}/${shader}.spv")
 endforeach()
 add_custom_target(spirv DEPENDS ${outputs})
+add_executable(visibility main.cpp renderer.cpp
+    ${imgui_SOURCE_DIR}/imgui.cpp ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+add_dependencies(visibility spirv)
+target_compile_definitions(visibility PRIVATE GLFW_INCLUDE_NONE IMGUI_IMPL_VULKAN_USE_VOLK
+    VMA_STATIC_VULKAN_FUNCTIONS=0 VMA_DYNAMIC_VULKAN_FUNCTIONS=1 GLM_FORCE_DEPTH_ZERO_TO_ONE VIS_SHADER_DIR="${shader_dir}")
+target_include_directories(visibility PRIVATE "${imgui_SOURCE_DIR}" "${vma_SOURCE_DIR}/include")
+target_link_libraries(visibility PRIVATE glfw volk glm::glm)
