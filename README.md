@@ -13,3 +13,7 @@ ctest --test-dir build -C Release --output-on-failure
 ./build/visibility
 ./build/visibility --benchmark > timings.csv
 ```
+
+Use `build/Release/` with multi-config generators. The window lets you toggle culling paths, vary object counts and pause the orbit. Both `--smoke` and `--benchmark` still require a graphics session and create a hidden window.
+
+## Design
