@@ -17,3 +17,5 @@ ctest --test-dir build -C Release --output-on-failure
 Use `build/Release/` with multi-config generators. The window lets you toggle culling paths, vary object counts and pause the orbit. Both `--smoke` and `--benchmark` still require a graphics session and create a hidden window.
 
 ## Design
+
+GLM builds a Vulkan clip-space camera and six normalized frustum planes. Both paths test the same bounding spheres. The CPU writes visible IDs to mapped storage. The GPU path compacts surviving indices through an atomic counter directly into the shared instance list and indirect command, with a barrier from compute writes to indirect reads, vertex reads and host readback. Both draw the same additive billboards in one indirect instanced draw.
