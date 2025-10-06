@@ -21,3 +21,7 @@ Use `build/Release/` with multi-config generators. The window lets you toggle cu
 GLM builds a Vulkan clip-space camera and six normalized frustum planes. Both paths test the same bounding spheres. The CPU writes visible IDs to mapped storage. The GPU path compacts surviving indices through an atomic counter directly into the shared instance list and indirect command, with a barrier from compute writes to indirect reads, vertex reads and host readback. Both draw the same additive billboards in one indirect instanced draw.
 
 VMA owns the mapped buffers. The application waits for each submission before reusing those buffers. This makes frame samples easy to compare and excludes overlap between frames. CPU timing captures culling and command recording for the visibility phase. Vulkan timestamps report GPU work through the visibility phase and through the draw, including clears and graphics pipeline work ahead of the timestamp. The visibility phase in CPU mode includes the indirect-command upload. It excludes CPU frustum testing, which appears in the CPU column.
+
+## Validation and capture
+
+The graphics smoke test compares both paths against a CPU count at 4,096, 65,536 and 262,144 objects. The benchmark takes 12 warm-up frames and 120 measured frames per path/count and writes median microseconds at a fixed camera angle and a nominal 1024×640 framebuffer. It requests immediate presentation when supported. Record the actual framebuffer size, CPU, GPU, driver and build configuration alongside results.
