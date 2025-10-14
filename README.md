@@ -25,3 +25,5 @@ VMA owns the mapped buffers. The application waits for each submission before re
 ## Validation and capture
 
 The graphics smoke test compares both paths against a CPU count at 4,096, 65,536 and 262,144 objects. The benchmark takes 12 warm-up frames and 120 measured frames per path/count and writes median microseconds at a fixed camera angle and a nominal 1024×640 framebuffer. It requests immediate presentation when supported. Record the actual framebuffer size, CPU, GPU, driver and build configuration alongside results.
+
+In RenderDoc, launch the built executable with the interactive scene and capture a frame with compute culling enabled. Inspect the compute dispatch, the barrier and the indirect command under the scene draw. Compare against a frame with compute culling disabled and the orbit paused.
