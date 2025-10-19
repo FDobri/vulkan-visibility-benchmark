@@ -27,3 +27,16 @@ VMA owns the mapped buffers. The application waits for each submission before re
 The graphics smoke test compares both paths against a CPU count at 4,096, 65,536 and 262,144 objects. The benchmark takes 12 warm-up frames and 120 measured frames per path/count and writes median microseconds at a fixed camera angle and a nominal 1024×640 framebuffer. It requests immediate presentation when supported. Record the actual framebuffer size, CPU, GPU, driver and build configuration alongside results.
 
 In RenderDoc, launch the built executable with the interactive scene and capture a frame with compute culling enabled. Inspect the compute dispatch, the barrier and the indirect command under the scene draw. Compare against a frame with compute culling disabled and the orbit paused.
+
+## Measured medians
+
+Ryzen 7 3700X, GeForce RTX 3070 Ti driver 596.49, Windows 10 22H2, MSVC 19.44 x64 Release, 1024×640, fixed camera and 120 samples after warm-up.
+
+| Objects | Path | Visible | CPU work (µs) | GPU visibility phase (µs) | GPU through scene draw (µs) |
+| ---: | :--- | ---: | ---: | ---: | ---: |
+| 4,096 | CPU | 1,685 | 51.30 | 3.97 | 7.55 |
+| 4,096 | Compute | 1,685 | 7.60 | 13.78 | 18.24 |
+| 65,536 | CPU | 27,239 | 936.75 | 4.00 | 27.33 |
+| 65,536 | Compute | 27,239 | 7.80 | 109.63 | 133.55 |
+| 262,144 | CPU | 109,330 | 3820.00 | 4.35 | 91.78 |
+| 262,144 | Compute | 109,330 | 7.90 | 419.10 | 507.34 |
